@@ -6,13 +6,12 @@ Authors: Daniel Adams/Steve McKee/Gustavo Gonnet
 
 Date: May 27th 2019
 
-Vertical Water Leak Sensor Detector for Home Security Warning Signal System
-  https://www.ebay.com/itm/DC-12V-Water-Leak-Sensor-Detector-for-Home-Security-Warning-Alert-Alarm-EC/362538089184?epid=628768485&hash=item5468f43ae0:g:CfQAAOSw5wFcIFGx&autorefresh=true
+[Vertical Water Leak Sensor Detector for Home Security Warning Signal System](https://www.ebay.com/itm/DC-12V-Water-Leak-Sensor-Detector-for-Home-Security-Warning-Alert-Alarm-EC/362538089184?epid=628768485&hash=item5468f43ae0:g:CfQAAOSw5wFcIFGx&autorefresh=true)
 
-Flat water leak sensor
-  https://www.ebay.com/itm/5-Pcs-Water-Leak-Flood-Alarm-Sensor-w-Leads-/113535583234
+[Flat water leak sensor](https://www.ebay.com/itm/5-Pcs-Water-Leak-Flood-Alarm-Sensor-w-Leads-/113535583234)
 
 
+# License
 
 Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0)
 
