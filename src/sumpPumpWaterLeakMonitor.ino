@@ -42,25 +42,27 @@
 #include "FiniteStateMachine.h"
 
 #define APP_NAME "sumpPumpWaterLeakMonitor"
-#define VERSION "Version 0.01"
+#define VERSION "Version 0.03"
 
 /*******************************************************************************
  * changes in version 0.01:
        * Initial version
+ * changes in version 0.02:
+       * defined where to plug water sensor: A0
+       * defined where to plug sump pump level sensors: D0 and D1
+ * changes in version 0.03:
+       * added sump pump level monitor sensors
 *******************************************************************************/
 /*******************************************************************************
  * TODO:
-   * define where to plug water sensor
-   * define where to plug sump pump level sensors
    * add software watchdog
-   * add sump pump level monitor sensors
 *******************************************************************************/
 
 // enable the user code (our program below) to run in parallel with cloud connectivity code
 // source: https://docs.particle.io/reference/firmware/photon/#system-thread
 SYSTEM_THREAD(ENABLED);
 
-#define WATER_LEAK_SENSOR A3
+#define WATER_LEAK_SENSOR A0
 unsigned int integratorWaterLeakSensor = 0;
 int waterLeakSensor = 0;
 
@@ -72,15 +74,24 @@ int sumpPumpSensorHigh = 0;
 unsigned int integratorSumpPumpSensorVeryHigh = 0;
 int sumpPumpSensorVeryHigh = 0;
 
-// FSM declaration
 #define STATE_OK "Sensor OK"
 #define STATE_ALARM "Sensor Alarm"
-#define ALARM_MIN 30000 // min amount of time to stay in alarm before coming back to normal
+#define ALARM_MIN 10000 // min amount of time to stay in alarm before coming back to normal
 
+// FSM declaration for water sensor
 State waterLeakOkState = State(waterLeakOkEnterFunction, waterLeakOkUpdateFunction, waterLeakOkExitFunction);
 State waterLeakAlarmState = State(waterLeakAlarmEnterFunction, waterLeakAlarmUpdateFunction, waterLeakAlarmExitFunction);
 FSM waterLeakStateMachine = FSM(waterLeakOkState);
 String waterLeakState = STATE_OK;
+
+#define STATE_HIGH_LEVEL "Sensor High Level"
+#define STATE_VERY_HIGH_LEVEL "Sensor Very High Level"
+// FSM declaration for sump pump sensors
+State sumpPumpOkState = State(sumpPumpOkEnterFunction, sumpPumpOkUpdateFunction, sumpPumpOkExitFunction);
+State sumpPumpHighLevelState = State(sumpPumpHighLevelEnterFunction, sumpPumpHighLevelUpdateFunction, sumpPumpHighLevelExitFunction);
+State sumpPumpVeryHighLevelState = State(sumpPumpVeryHighLevelEnterFunction, sumpPumpVeryHighLevelUpdateFunction, sumpPumpVeryHighLevelExitFunction);
+FSM sumpPumpStateMachine = FSM(sumpPumpOkState);
+String sumpPumpState = STATE_OK;
 
 /* The following parameters tune the algorithm to fit the particular
 application.  The example numbers are for a case where a computer samples a
@@ -94,6 +105,10 @@ Timer debounceInputsTimer(20, debounceInputs);
 #define MAXIMUM (DEBOUNCE_TIME * SAMPLE_FREQUENCY)
 
 bool testPublishFlag = false;
+
+// comment out if you do NOT want serial logging
+SerialLogHandler logHandler(LOG_LEVEL_ALL);
+//SerialLogHandler logHandler(LOG_LEVEL_WARN);
 
 /*******************************************************************************
  * Function Name  : setup
@@ -113,13 +128,17 @@ void setup()
   // a maximum of 12 characters (prior to 0.8.0), 64 characters (since 0.8.0).
   // https://docs.particle.io/reference/device-os/firmware/boron/#particle-variable-
   Particle.variable("waterLeakState", waterLeakState);
+  Particle.variable("sumpPumpState", sumpPumpState);
 
-  pinMode(WATER_LEAK_SENSOR, INPUT);
+  pinMode(WATER_LEAK_SENSOR, INPUT_PULLDOWN);
+  pinMode(SUMP_PUMP_SENSOR_HIGH, INPUT_PULLDOWN);
+  pinMode(SUMP_PUMP_SENSOR_VERY_HIGH, INPUT_PULLDOWN);
 
   debounceInputsTimer.start();
 
   // publish start up message with firmware version
   Particle.publish(APP_NAME, VERSION, PRIVATE | WITH_ACK);
+  Log.info(String(APP_NAME) + " " + String(VERSION));
 }
 
 /*******************************************************************************
@@ -130,6 +149,7 @@ void loop()
 {
 
   waterLeakStateMachine.update();
+  sumpPumpStateMachine.update();
 
   // check if the testPublish cloud function was called
   checkTestPublishFlag();
@@ -173,13 +193,15 @@ int testPublish(String dummy)
 *******************************************************************************/
 void waterLeakOkEnterFunction()
 {
+  Particle.publish("OK", "WATER LEAK sensor OK", PRIVATE | WITH_ACK);
   waterLeakSetState(STATE_OK);
 }
 void waterLeakOkUpdateFunction()
 {
-  if (waterLeakSensor == 1)
+  if (waterLeakSensor == HIGH)
   {
     waterLeakStateMachine.transitionTo(waterLeakAlarmState);
+    Log.info("waterLeakSensor is HIGH, transition to waterLeakAlarmState");
   }
 }
 void waterLeakOkExitFunction()
@@ -198,14 +220,14 @@ void waterLeakAlarmUpdateFunction()
     return;
   }
   // sensor went back to normal
-  if (waterLeakSensor == 0)
+  if (waterLeakSensor == LOW)
   {
     waterLeakStateMachine.transitionTo(waterLeakOkState);
+    Log.info("waterLeakSensor is LOW, transition to waterLeakOkState");
   }
 }
 void waterLeakAlarmExitFunction()
 {
-  Particle.publish("OK", "WATER LEAK sensor OK", PRIVATE | WITH_ACK);
 }
 
 /*******************************************************************************
@@ -217,6 +239,102 @@ void waterLeakSetState(String newState)
 {
   waterLeakState = newState;
   Particle.publish("FSM", "WATER LEAK fsm entering " + newState + " state", PRIVATE | WITH_ACK);
+  Log.info("WATER LEAK fsm entering " + newState + " state");
+}
+
+/*******************************************************************************
+ SUMP PUMP sensor
+*******************************************************************************/
+void sumpPumpOkEnterFunction()
+{
+  Particle.publish("OK", "SUMP PUMP sensors OK", PRIVATE | WITH_ACK);
+  sumpPumpSetState(STATE_OK);
+}
+void sumpPumpOkUpdateFunction()
+{
+  if (sumpPumpSensorHigh == HIGH)
+  {
+    sumpPumpStateMachine.transitionTo(sumpPumpHighLevelState);
+    Log.info("sumpPumpSensorHigh is HIGH, transition to sumpPumpHighLevelState");
+  }
+  if (sumpPumpSensorVeryHigh == HIGH)
+  {
+    sumpPumpStateMachine.transitionTo(sumpPumpVeryHighLevelState);
+    Log.info("sumpPumpSensorVeryHigh is HIGH, transition to sumpPumpVeryHighLevelState");
+  }
+}
+void sumpPumpOkExitFunction()
+{
+}
+
+void sumpPumpHighLevelEnterFunction()
+{
+  Particle.publish("ALARM", "Alarm on SUMP PUMP sensor: HIGH level reached", PRIVATE | WITH_ACK);
+  sumpPumpSetState(STATE_HIGH_LEVEL);
+}
+void sumpPumpHighLevelUpdateFunction()
+{
+  // stay here a minimum time
+  if (sumpPumpStateMachine.timeInCurrentState() < ALARM_MIN)
+  {
+    return;
+  }
+  // sensors went back to normal
+  if ((sumpPumpSensorHigh == LOW) && (sumpPumpSensorVeryHigh == LOW))
+  {
+    sumpPumpStateMachine.transitionTo(sumpPumpOkState);
+    Log.info("sumpPumpSensorHigh and sumpPumpSensorVeryHigh are LOW, transition to sumpPumpOkState");
+  }
+  // sensor very high got triggered
+  if (sumpPumpSensorVeryHigh == HIGH)
+  {
+    sumpPumpStateMachine.transitionTo(sumpPumpVeryHighLevelState);
+    Log.info("sumpPumpSensorVeryHigh is HIGH, transition to sumpPumpVeryHighLevelState");
+  }
+}
+void sumpPumpHighLevelExitFunction()
+{
+}
+
+void sumpPumpVeryHighLevelEnterFunction()
+{
+  Particle.publish("ALARM", "Alarm on SUMP PUMP sensor: VERY HIGH level reached", PRIVATE | WITH_ACK);
+  sumpPumpSetState(STATE_VERY_HIGH_LEVEL);
+}
+void sumpPumpVeryHighLevelUpdateFunction()
+{
+  // stay here a minimum time
+  if (sumpPumpStateMachine.timeInCurrentState() < ALARM_MIN)
+  {
+    return;
+  }
+  // both sensors went back to normal
+  if ((sumpPumpSensorHigh == LOW) && (sumpPumpSensorVeryHigh == LOW))
+  {
+    sumpPumpStateMachine.transitionTo(sumpPumpOkState);
+    Log.info("sumpPumpSensorHigh and sumpPumpSensorVeryHigh are LOW, transition to sumpPumpOkState");
+  }
+  // sensor very high went normal
+  if ((sumpPumpSensorHigh == HIGH) && (sumpPumpSensorVeryHigh == LOW))
+  {
+    sumpPumpStateMachine.transitionTo(sumpPumpHighLevelState);
+    Log.info("sumpPumpSensorHigh is HIGH and sumpPumpSensorVeryHigh is LOW, transition to sumpPumpHighLevelState");
+  }
+}
+void sumpPumpVeryHighLevelExitFunction()
+{
+}
+
+/*******************************************************************************
+ * Function Name  : sumpPumpSetState
+ * Description    : sets the state of an FSM
+ * Return         : none
+ *******************************************************************************/
+void sumpPumpSetState(String newState)
+{
+  sumpPumpState = newState;
+  Particle.publish("FSM", "SUMP PUMP fsm entering " + newState + " state", PRIVATE | WITH_ACK);
+  Log.info("SUMP PUMP fsm entering " + newState + " state");
 }
 
 /*******************************************************************************
