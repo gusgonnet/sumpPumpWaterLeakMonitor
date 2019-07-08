@@ -37,12 +37,10 @@
 //
 // https://creativecommons.org/licenses/by-nc-sa/4.0/
 
-// #include "elapsedMillis.h"
-// #include "AnalogSmooth.h"
 #include "FiniteStateMachine.h"
 
 #define APP_NAME "sumpPumpWaterLeakMonitor"
-#define VERSION "Version 0.03"
+#define VERSION "Version 0.04"
 
 /*******************************************************************************
  * changes in version 0.01:
@@ -52,10 +50,13 @@
        * defined where to plug sump pump level sensors: D0 and D1
  * changes in version 0.03:
        * added sump pump level monitor sensors
+ * changes in version 0.04:
+       * added soak period (IN_TRANSITION) before sending alarm
 *******************************************************************************/
 /*******************************************************************************
  * TODO:
-   * add software watchdog
+   * add software watchdog (see link below)
+   * add all this: https://github.com/rickkas7/electronsample
 *******************************************************************************/
 
 // enable the user code (our program below) to run in parallel with cloud connectivity code
@@ -75,11 +76,14 @@ unsigned int integratorSumpPumpSensorVeryHigh = 0;
 int sumpPumpSensorVeryHigh = 0;
 
 #define STATE_OK "Sensor OK"
+#define STATE_IN_TRANSITION "Sensor in transition"
 #define STATE_ALARM "Sensor Alarm"
-#define ALARM_MIN 10000 // min amount of time to stay in alarm before coming back to normal
+#define ALARM_TRANSITION_PERIOD 30000 // min amount of time to before an alarm is sent out
+#define ALARM_MIN 10000         // min amount of time to stay in alarm before coming back to normal
 
 // FSM declaration for water sensor
 State waterLeakOkState = State(waterLeakOkEnterFunction, waterLeakOkUpdateFunction, waterLeakOkExitFunction);
+State waterLeakTransitionState = State(waterLeakTransitionEnterFunction, waterLeakTransitionUpdateFunction, waterLeakTransitionExitFunction);
 State waterLeakAlarmState = State(waterLeakAlarmEnterFunction, waterLeakAlarmUpdateFunction, waterLeakAlarmExitFunction);
 FSM waterLeakStateMachine = FSM(waterLeakOkState);
 String waterLeakState = STATE_OK;
@@ -88,6 +92,7 @@ String waterLeakState = STATE_OK;
 #define STATE_VERY_HIGH_LEVEL "Sensor Very High Level"
 // FSM declaration for sump pump sensors
 State sumpPumpOkState = State(sumpPumpOkEnterFunction, sumpPumpOkUpdateFunction, sumpPumpOkExitFunction);
+State sumpPumpTransitionState = State(sumpPumpTransitionEnterFunction, sumpPumpTransitionUpdateFunction, sumpPumpTransitionExitFunction);
 State sumpPumpHighLevelState = State(sumpPumpHighLevelEnterFunction, sumpPumpHighLevelUpdateFunction, sumpPumpHighLevelExitFunction);
 State sumpPumpVeryHighLevelState = State(sumpPumpVeryHighLevelEnterFunction, sumpPumpVeryHighLevelUpdateFunction, sumpPumpVeryHighLevelExitFunction);
 FSM sumpPumpStateMachine = FSM(sumpPumpOkState);
@@ -200,13 +205,41 @@ void waterLeakOkUpdateFunction()
 {
   if (waterLeakSensor == HIGH)
   {
-    waterLeakStateMachine.transitionTo(waterLeakAlarmState);
-    Log.info("waterLeakSensor is HIGH, transition to waterLeakAlarmState");
+    waterLeakStateMachine.transitionTo(waterLeakTransitionState);
+    Log.info("waterLeakSensor is HIGH, transition to waterLeakTransitionState");
   }
 }
 void waterLeakOkExitFunction()
 {
 }
+
+void waterLeakTransitionEnterFunction()
+{
+  Particle.publish("IN TRANSITION", "WATER LEAK sensor IN TRANSITION", PRIVATE | WITH_ACK);
+  waterLeakSetState(STATE_IN_TRANSITION);
+}
+void waterLeakTransitionUpdateFunction()
+{
+  // stay here the soak period before sending any alarm
+  if (waterLeakStateMachine.timeInCurrentState() < ALARM_TRANSITION_PERIOD)
+  {
+    return;
+  }
+  if (waterLeakSensor == HIGH)
+  {
+    waterLeakStateMachine.transitionTo(waterLeakAlarmState);
+    Log.info("waterLeakSensor is HIGH, transition to waterLeakAlarmState");
+  }
+  if (waterLeakSensor == LOW)
+  {
+    waterLeakStateMachine.transitionTo(waterLeakOkState);
+    Log.info("waterLeakSensor is LOW, transition to waterLeakOkState");
+  }
+}
+void waterLeakTransitionExitFunction()
+{
+}
+
 void waterLeakAlarmEnterFunction()
 {
   Particle.publish("ALARM", "Alarm on WATER LEAK sensor", PRIVATE | WITH_ACK);
@@ -254,6 +287,34 @@ void sumpPumpOkUpdateFunction()
 {
   if (sumpPumpSensorHigh == HIGH)
   {
+    sumpPumpStateMachine.transitionTo(sumpPumpTransitionState);
+    Log.info("sumpPumpSensorHigh is HIGH, transition to sumpPumpTransitionState");
+  }
+  if (sumpPumpSensorVeryHigh == HIGH)
+  {
+    sumpPumpStateMachine.transitionTo(sumpPumpTransitionState);
+    Log.info("sumpPumpSensorVeryHigh is HIGH, transition to sumpPumpTransitionState");
+  }
+}
+void sumpPumpOkExitFunction()
+{
+}
+
+void sumpPumpTransitionEnterFunction()
+{
+  Particle.publish("IN TRANSITION", "SUMP PUMP sensors IN TRANSITION", PRIVATE | WITH_ACK);
+  sumpPumpSetState(STATE_IN_TRANSITION);
+}
+void sumpPumpTransitionUpdateFunction()
+{
+  // stay here the soak period before sending any alarm
+  if (sumpPumpStateMachine.timeInCurrentState() < ALARM_TRANSITION_PERIOD)
+  {
+    return;
+  }
+
+  if (sumpPumpSensorHigh == HIGH)
+  {
     sumpPumpStateMachine.transitionTo(sumpPumpHighLevelState);
     Log.info("sumpPumpSensorHigh is HIGH, transition to sumpPumpHighLevelState");
   }
@@ -262,8 +323,14 @@ void sumpPumpOkUpdateFunction()
     sumpPumpStateMachine.transitionTo(sumpPumpVeryHighLevelState);
     Log.info("sumpPumpSensorVeryHigh is HIGH, transition to sumpPumpVeryHighLevelState");
   }
+
+  if ((sumpPumpSensorHigh == LOW) && (sumpPumpSensorVeryHigh == LOW))
+  {
+    sumpPumpStateMachine.transitionTo(sumpPumpOkState);
+    Log.info("sumpPumpSensorHigh and sumpPumpSensorVeryHigh are LOW, transition to sumpPumpOkState");
+  }
 }
-void sumpPumpOkExitFunction()
+void sumpPumpTransitionExitFunction()
 {
 }
 
